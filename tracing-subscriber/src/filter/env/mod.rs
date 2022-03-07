@@ -112,7 +112,7 @@ pub struct EnvFilter {
 }
 
 thread_local! {
-    static SCOPE: RefCell<Vec<LevelFilter>> = RefCell::new(Vec::new());
+    static SCOPE: RefCell<Vec<(LevelFilter, Option<String>)>> = RefCell::new(Vec::new());
 }
 
 type FieldMap<T> = HashMap<Field, T>;
@@ -422,8 +422,13 @@ impl<S: Subscriber> Layer<S> for EnvFilter {
             }
 
             let enabled_by_scope = SCOPE.with(|scope| {
-                for filter in scope.borrow().iter() {
-                    if filter >= level {
+                for (filter, target) in scope.borrow().iter() {
+                    if filter >= level
+                        && target
+                            .as_ref()
+                            .map(|target| metadata.target().starts_with(target))
+                            .unwrap_or(true)
+                    {
                         return true;
                     }
                 }
@@ -463,7 +468,7 @@ impl<S: Subscriber> Layer<S> for EnvFilter {
         // that to allow changing the filter while a span is already entered.
         // But that might be much less efficient...
         if let Some(span) = try_lock!(self.by_id.read()).get(id) {
-            SCOPE.with(|scope| scope.borrow_mut().push(span.level()));
+            SCOPE.with(|scope| scope.borrow_mut().push((span.level(), span.target())));
         }
     }
 

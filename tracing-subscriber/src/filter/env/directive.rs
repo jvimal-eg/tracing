@@ -1,4 +1,5 @@
 pub(crate) use crate::filter::directive::{FilterVec, ParseError, StaticDirective};
+use crate::filter::env::field::CallsiteMatch;
 use crate::filter::{
     directive::{DirectiveSet, Match},
     env::{field, FieldMap},
@@ -33,6 +34,7 @@ pub(crate) type SpanMatcher = MatchSet<field::SpanMatch>;
 pub(crate) struct MatchSet<T> {
     field_matches: FilterVec<T>,
     base_level: LevelFilter,
+    target: Option<String>,
 }
 
 impl Directive {
@@ -362,9 +364,19 @@ impl From<Level> for Directive {
 impl Dynamics {
     pub(crate) fn matcher(&self, metadata: &Metadata<'_>) -> Option<CallsiteMatcher> {
         let mut base_level = None;
+        let mut target = None::<String>;
         let field_matches = self
             .directives_for(metadata)
             .filter_map(|d| {
+                if let Some(ref matcher_target) = d.target {
+                    match target {
+                        Some(ref inner_target) if inner_target.len() < matcher_target.len() => {
+                            target = Some(matcher_target.clone())
+                        }
+                        None => target = Some(matcher_target.clone()),
+                        _ => {}
+                    }
+                }
                 if let Some(f) = d.field_matcher(metadata) {
                     return Some(f);
                 }
@@ -381,11 +393,13 @@ impl Dynamics {
             Some(CallsiteMatcher {
                 field_matches,
                 base_level,
+                target,
             })
         } else if !field_matches.is_empty() {
             Some(CallsiteMatcher {
                 field_matches,
                 base_level: base_level.unwrap_or(LevelFilter::OFF),
+                target,
             })
         } else {
             None
@@ -415,6 +429,7 @@ impl CallsiteMatcher {
         SpanMatcher {
             field_matches,
             base_level: self.base_level,
+            target: self.target.clone(),
         }
     }
 }
@@ -427,6 +442,10 @@ impl SpanMatcher {
             .filter_map(field::SpanMatch::filter)
             .max()
             .unwrap_or(self.base_level)
+    }
+
+    pub(crate) fn target(&self) -> Option<String> {
+        self.target.clone()
     }
 
     pub(crate) fn record_update(&self, record: &span::Record<'_>) {
